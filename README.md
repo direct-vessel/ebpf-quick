@@ -1,1 +1,1 @@
-# kube-ebpf
+# kube-ebpf-operator
