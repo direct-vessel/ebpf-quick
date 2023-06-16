@@ -23,7 +23,7 @@ docker push direct-vessel/runbpf:test
 make examples
 ```
 
-4、Deploy the BPF custom resources for  the paccetti program. (Note: **only one ebpf program at one time** can be running on Kubernetes cluster.)
+4、Deploy the BPF custom resources for  the paccetti program. (Note: currently，**only one ebpf program at one time** can be running on Kubernetes cluster.)
 
 ```console
 kubectl apply -f pacchetti.yaml
