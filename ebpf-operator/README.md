@@ -12,6 +12,7 @@ make build
 
 ```console
 make docker-build
+docker push direct-vessel/ebpf-operator:test
 ```
 
 3、Deploy CR and ebpf-operator to your Kubernetes cluster
