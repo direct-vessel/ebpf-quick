@@ -1,10 +1,10 @@
 # run-ebpf
 
-run-ebpf is used to run an ebpf program on nodes, and provides mapcollector to Prometheus for bpf map data.
+run-ebpf is used to run an ebpf program on nodes of cluster, and provides mapcollector to Prometheus for bpf map data.
 
 ## Usage
 
-1、Build the runner and other tools
+1、Build the runner, and other go tools
 
 ```console
 make
@@ -23,7 +23,7 @@ docker push direct-vessel/runbpf:test
 make examples
 ```
 
-4、Deploy  the BPF custom resources for paccetti program. (Note: **only one ebpf program at one time** can be running on Kubernetes cluster.)
+4、Deploy the BPF custom resources for  the paccetti program. (Note: **only one ebpf program at one time** can be running on Kubernetes cluster.)
 
 ```console
 kubectl apply -f pacchetti.yaml
@@ -38,7 +38,7 @@ NAME                DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SE
 bpf-pacchetti-bpf   1         1         1       1            1           <none>          4h53m
 ```
 
-6、Access runbpf's mapcollector for bpf map created by ebpf program. The paccetti program is used to collect  a pair of protocol number -> count.  See the wikipedia article on protocol numbers:  https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
+6、Access runbpf's mapcollector for bpf map created by the pacchetti program. The paccetti program is used to collect a pair of protocol number -> count.  See the wikipedia article on protocol numbers:  https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
 
 ```console
 [root@VM-24-16-centos output]# curl http://127.0.0.1:9387/metrics
