@@ -23,7 +23,7 @@ kubectl apply -f deploy/ebpf-operator.yaml
 4、Check ebpf-operator has successfully running on your Kubernetes cluster
 
 ```console
-[root@VM-24-16-centos ebpf-operator]# kubectl get pods -n ebpf-operator-system
+# kubectl get pods -n ebpf-operator-system
 NAME                                                READY   STATUS    RESTARTS   AGE
 ebpf-operator-controller-manager-664f694bcd-7cl7j   2/2     Running   0          4h43m
 ```
