@@ -1,0 +1,4 @@
+## Append samples of your project ##
+resources:
+- bpf_v1_bpf.yaml
+#+kubebuilder:scaffold:manifestskustomizesamples

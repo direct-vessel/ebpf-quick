@@ -1,0 +1,12 @@
+apiVersion: bpf.cloud/v1
+kind: BPF
+metadata:
+  labels:
+    app.kubernetes.io/name: bpf
+    app.kubernetes.io/instance: bpf-sample
+    app.kubernetes.io/part-of: ebpf-operator
+    app.kubernetes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: ebpf-operator
+  name: bpf-sample
+spec:
+  # TODO(user): Add fields here
