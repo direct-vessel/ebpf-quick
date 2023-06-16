@@ -38,7 +38,7 @@ NAME                DESIRED   CURRENT   READY   UP-TO-DATE   AVAILABLE   NODE SE
 bpf-pacchetti-bpf   1         1         1       1            1           <none>          4h53m
 ```
 
-6、Access runbpf's mapcollector for bpf map created by the pacchetti program. The paccetti program is used to collect a pair of protocol number -> count.  See the wikipedia article on protocol numbers:  https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
+6、Access runbpf's mapcollector for bpf map created by the pacchetti program. The paccetti program is used to collect a pair of protocol number -> package count.  See the wikipedia article on protocol numbers:  https://en.wikipedia.org/wiki/List_of_IP_protocol_numbers
 
 ```console
 [root@VM-24-16-centos output]# curl http://127.0.0.1:9387/metrics
