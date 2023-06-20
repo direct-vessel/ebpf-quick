@@ -8,7 +8,7 @@ ebpf-operator runs on Kubernetes, which is used to create a daemonset resource t
 make build
 ```
 
-2、Build the docker image (or push it to your image registry when the code has changes)
+2、Build the docker image or (push it to your image registry when the code has changes)
 
 ```console
 make docker-build

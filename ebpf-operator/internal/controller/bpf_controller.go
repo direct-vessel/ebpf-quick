@@ -27,12 +27,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	"k8s.io/client-go/tools/record"
 	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	bpfv1 "ebpf-operator/api/v1"
 )
@@ -40,16 +38,13 @@ import (
 // BPFReconciler reconciles a BPF object
 type BPFReconciler struct {
 	client.Client
-	Log      logr.Logger
-	Scheme   *runtime.Scheme
-	Recorder record.EventRecorder
+	Scheme *runtime.Scheme
 }
 
 //+kubebuilder:rbac:groups=bpf.cloud,resources=bpfs,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=bpf.cloud,resources=bpfs/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=bpf.cloud,resources=bpfs/finalizers,verbs=update
 //+kubebuilder:rbac:groups=apps,resources=daemonsets,verbs=get;list;watch;create;update;patch;delete
-//+kubebuilder:rbac:groups="",resources=services,verbs=get;list;watch;create;update;patch;delete
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -61,11 +56,11 @@ type BPFReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.14.4/pkg/reconcile
 func (r *BPFReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	log := log.FromContext(ctx).WithValues("ebpf", req.NamespacedName)
+	log := log.FromContext(ctx)
 	// Load the BPF Resource by name.
-	var ebpf bpfv1.BPF
+	ebpf := &bpfv1.BPF{}
 	log.Info("fetching BPF Resource")
-	if err := r.Get(ctx, req.NamespacedName, &ebpf); err != nil {
+	if err := r.Get(ctx, req.NamespacedName, ebpf); err != nil {
 		log.Error(err, "unable to fetch ebpf")
 		// we'll ignore not-found errors, since they can't be fixed by an immediate
 		// requeue (we'll need to wait for a new notification), and we can get them
@@ -73,135 +68,46 @@ func (r *BPFReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		return ctrl.Result{}, client.IgnoreNotFound(err)
 	}
 
-	// Clean Up old Daemonset and Service which had been owned by BPF Resource.
-	if err := r.cleanupOwnedResources(ctx, log, &ebpf); err != nil {
-		log.Error(err, "failed to clean up old daemonset and sevice resources for this BPF")
-		return ctrl.Result{}, err
+	// name of our custom finalizer
+	ebpfFinalizer := "ebpf.bpf.cloud/finalizer"
+
+	if ebpf.ObjectMeta.DeletionTimestamp.IsZero() {
+		// The object is not being deleted, so if it does not have our finalizer,
+		// then lets add the finalizer and update the object. This is equivalent
+		// registering our finalizer.
+		if !ContainsString(ebpf.ObjectMeta.Finalizers, ebpfFinalizer) {
+			ebpf.ObjectMeta.Finalizers = append(ebpf.ObjectMeta.Finalizers, ebpfFinalizer)
+			if err := r.Update(ctx, ebpf); err != nil {
+				return ctrl.Result{}, err
+			}
+			if err := r.createDaemonSet(ctx, log, ebpf); err != nil {
+				return ctrl.Result{}, nil
+			}
+		}
+	} else {
+		// The object is being deleted
+		if ContainsString(ebpf.ObjectMeta.Finalizers, ebpfFinalizer) {
+			ebpf.ObjectMeta.Finalizers = RemoveString(ebpf.ObjectMeta.Finalizers, ebpfFinalizer)
+			if err := r.Update(ctx, ebpf); err != nil {
+				return ctrl.Result{}, err
+			}
+		}
+		return ctrl.Result{}, nil
 	}
 
-	// Create or Update daemonset and service object which match bpf.Spec.
-	if err := createOrUpdateDaemonSet(ctx, log, r, &ebpf); err != nil {
-		return ctrl.Result{}, err
-	}
-	if err := createOrUpdateService(ctx, log, r, &ebpf); err != nil {
-		return ctrl.Result{}, err
-	}
-
-	return reconcile.Result{}, nil
+	return ctrl.Result{}, nil
 
 }
 
-var (
-	resourceOwnerKey = ".metadata.controller"
-	apiGVStr         = bpfv1.GroupVersion.String()
-)
-
 // SetupWithManager sets up the controller with the Manager.
 func (r *BPFReconciler) SetupWithManager(mgr ctrl.Manager) error {
-
-	ctx := context.Background()
-
-	// add resourceOwnerKey index to daemonset and service object which ebpf resource owns
-	if err := mgr.GetFieldIndexer().IndexField(ctx, &appsv1.DaemonSet{}, resourceOwnerKey, func(object client.Object) []string {
-		// grab the daemonset object, extract the owner...
-		daemonset := object.(*appsv1.DaemonSet)
-		owner := metav1.GetControllerOf(daemonset)
-		if owner == nil {
-			return nil
-		}
-		// ...make sure it's a BPF...
-		if owner.APIVersion != apiGVStr || owner.Kind != "BPF" {
-			return nil
-		}
-
-		// ...and if so, return it
-		return []string{owner.Name}
-	}); err != nil {
-		return err
-	}
-
-	if err := mgr.GetFieldIndexer().IndexField(ctx, &corev1.Service{}, resourceOwnerKey, func(object client.Object) []string {
-		// grab the service object, extract the owner...
-		service := object.(*corev1.Service)
-		owner := metav1.GetControllerOf(service)
-		if owner == nil {
-			return nil
-		}
-		// ...make sure it's a BPF...
-		if owner.APIVersion != apiGVStr || owner.Kind != "BPF" {
-			return nil
-		}
-
-		// ...and if so, return it
-		return []string{owner.Name}
-	}); err != nil {
-		return err
-	}
-
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&bpfv1.BPF{}).
 		Complete(r)
 }
 
-// cleanupOwnedResources will delete any existing daemonset and service resources that
-// were created for the given BPF that no longer match the
-// BPF.Name field.
-func (r *BPFReconciler) cleanupOwnedResources(ctx context.Context, log logr.Logger, ebpf *bpfv1.BPF) error {
-	log.Info("finding existing daemonset and service for BPF resource")
-
-	// List all daemonset resources owned by this ebpf
-	var daemonsets appsv1.DaemonSetList
-	if err := r.List(ctx, &daemonsets, client.InNamespace(ebpf.Namespace), client.MatchingFields(map[string]string{resourceOwnerKey: ebpf.Name})); err != nil {
-		return err
-	}
-
-	// Delete daemonset if the daemonset name doesn't match ebpf.Name
-	for _, daemonset := range daemonsets.Items {
-		if daemonset.Name == ebpf.Name {
-			// If this daemonset's name matches the one on the BPF resource
-			// then do not delete it.
-			continue
-		}
-
-		// Delete old daemonset object which doesn't match ebpf.name.
-		if err := r.Delete(ctx, &daemonset); err != nil {
-			log.Error(err, "failed to delete daemonset resource")
-			return err
-		}
-
-		log.Info("delete daemonset resource: " + daemonset.Name)
-		//r.Recorder.Eventf(ebpf, corev1.EventTypeNormal, "Deleted", "Deleted daemonset %q", daemonset.Name)
-	}
-
-	// List all service resources owned by this ebpf
-	var services corev1.ServiceList
-	if err := r.List(ctx, &services, client.InNamespace(ebpf.Namespace), client.MatchingFields(map[string]string{resourceOwnerKey: ebpf.Name})); err != nil {
-		return err
-	}
-
-	// Delete daemonset if the daemonset name doesn't match ebpf.Name
-	for _, service := range services.Items {
-		if service.Name == ebpf.Name {
-			// If this daemonset's name matches the one on the BPF resource
-			// then do not delete it.
-			continue
-		}
-
-		// Delete old daemonset object which doesn't match BPF.name.
-		if err := r.Delete(ctx, &service); err != nil {
-			log.Error(err, "failed to delete service resource")
-			return err
-		}
-
-		log.Info("delete service resource: " + service.Name)
-		r.Recorder.Eventf(ebpf, corev1.EventTypeNormal, "Deleted", "Deleted service %q", service.Name)
-	}
-
-	return nil
-}
-
-func createOrUpdateDaemonSet(ctx context.Context, log logr.Logger, r *BPFReconciler, ebpf *bpfv1.BPF) error {
-	const bpfProgramAbsolutePath = "/bpf"
+func (r *BPFReconciler) createDaemonSet(ctx context.Context, log logr.Logger, ebpf *bpfv1.BPF) error {
+	bpfProgramAbsolutePath := "/bpf"
 	if ebpf.ObjectMeta.Labels == nil {
 		ebpf.ObjectMeta.Labels = map[string]string{}
 	}
@@ -320,45 +226,23 @@ func createOrUpdateDaemonSet(ctx context.Context, log logr.Logger, r *BPFReconci
 
 }
 
-func createOrUpdateService(ctx context.Context, log logr.Logger, r *BPFReconciler, ebpf *bpfv1.BPF) error {
-	const bpfProgramAbsolutePath = "/bpf"
-	appName := fmt.Sprintf("bpf-%s", ebpf.Name)
-	if ebpf.ObjectMeta.Labels == nil {
-		ebpf.ObjectMeta.Labels = map[string]string{}
+func ContainsString(slice []string, s string) bool {
+
+	for _, item := range slice {
+		if item == s {
+			return true
+		}
 	}
-	ebpf.ObjectMeta.Labels["app"] = appName
-	ebpf.ObjectMeta.Labels["bpf.sh/bpf-origin-uid"] = string(ebpf.ObjectMeta.UID)
-	ebpf.ObjectMeta.Annotations["prometheus.io/scrape"] = "true"
-	service := &corev1.Service{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        fmt.Sprintf("bpf-%s", ebpf.Name),
-			Namespace:   ebpf.Namespace,
-			Labels:      ebpf.ObjectMeta.Labels,
-			Annotations: ebpf.ObjectMeta.Annotations,
-		},
-		Spec: corev1.ServiceSpec{
-			Ports: []corev1.ServicePort{
-				corev1.ServicePort{
-					Name: "bpf",
-					Port: 9387,
-				},
-			},
-			Selector: map[string]string{
-				"app": appName,
-			},
-			Type: "ClusterIP",
-		},
+	return false
+}
+
+func RemoveString(slice []string, s string) (result []string) {
+	for _, item := range slice {
+		if item == s {
+			continue
+		}
+		result = append(result, item)
 	}
 
-	// set the owner so that garbage collection can kicks in
-	if err := ctrl.SetControllerReference(ebpf, service, r.Scheme); err != nil {
-		log.Error(err, "unable to set ownerReference from BPF to Service")
-		return err
-	}
-
-	// end of ctrl.CreateOrUpdate
-	log.Info("create service success")
-
-	return nil
-
+	return
 }
