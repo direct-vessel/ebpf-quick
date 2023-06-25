@@ -31,6 +31,7 @@ import (
 	"k8s.io/utils/pointer"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
@@ -78,12 +79,13 @@ func (r *BPFReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 	// name of our custom finalizer
 	ebpfFinalizer := "ebpf.bpf.cloud/finalizer"
 
+	// examine DeletionTimestamp to determine if object is under deletion
 	if ebpf.ObjectMeta.DeletionTimestamp.IsZero() {
 		// The object is not being deleted, so if it does not have our finalizer,
 		// then lets add the finalizer and update the object. This is equivalent
 		// registering our finalizer.
-		if !ContainsString(ebpf.ObjectMeta.Finalizers, ebpfFinalizer) {
-			ebpf.ObjectMeta.Finalizers = append(ebpf.ObjectMeta.Finalizers, ebpfFinalizer)
+		if !controllerutil.ContainsFinalizer(ebpf, ebpfFinalizer) {
+			controllerutil.AddFinalizer(ebpf, ebpfFinalizer)
 			if err := r.Update(ctx, ebpf); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -93,8 +95,9 @@ func (r *BPFReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 		}
 	} else {
 		// The object is being deleted
-		if ContainsString(ebpf.ObjectMeta.Finalizers, ebpfFinalizer) {
-			ebpf.ObjectMeta.Finalizers = RemoveString(ebpf.ObjectMeta.Finalizers, ebpfFinalizer)
+		if controllerutil.ContainsFinalizer(ebpf, ebpfFinalizer) {
+			// remove our finalizer from the list and update it.
+			controllerutil.RemoveFinalizer(ebpf, ebpfFinalizer)
 			if err := r.Update(ctx, ebpf); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -231,25 +234,4 @@ func (r *BPFReconciler) createDaemonSet(ctx context.Context, log logr.Logger, eb
 
 	return nil
 
-}
-
-func ContainsString(slice []string, s string) bool {
-
-	for _, item := range slice {
-		if item == s {
-			return true
-		}
-	}
-	return false
-}
-
-func RemoveString(slice []string, s string) (result []string) {
-	for _, item := range slice {
-		if item == s {
-			continue
-		}
-		result = append(result, item)
-	}
-
-	return
 }
